@@ -2,6 +2,7 @@ package cliente;
 
 import bolsa.Accion;
 import bolsa.Alerta;
+import bolsa.BolsaIbex;
 import servidor.IServidor;
 
 import java.rmi.server.UnicastRemoteObject;
@@ -26,7 +27,6 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
     private Screen screen;
     private MultiWindowTextGUI gui;
     private Table<String> tabla;
-    private BasicWindow ventana;
 
     public Cliente() throws RemoteException {
         super();
@@ -45,7 +45,7 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
 
         System.out.println("[CLIENTE] conectado al servidor!");
 
-        // Inicializar la interfaz TUI
+        // inicia interfaz lanterna
         inicializarTUI();
     }
 
@@ -58,36 +58,35 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
             gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(),
                     new EmptySpace(TextColor.ANSI.BLUE));
 
-            ventana = new BasicWindow("Monitor de Bolsa - IBEX 35");
+            BasicWindow ventana = new BasicWindow("Monitor de Bolsa - IBEX 35");
             ventana.setHints(java.util.Set.of(Window.Hint.CENTERED));
 
+            // ll vertical
             Panel mainPanel = new Panel();
-            mainPanel.setLayoutManager(new GridLayout(1));
+            mainPanel.setLayoutManager(new LinearLayout(Direction.VERTICAL));
 
-            // Título
+            // título -
             Label titulo = new Label("Monitor de Bolsa - IBEX 35");
             titulo.setForegroundColor(TextColor.ANSI.CYAN_BRIGHT);
-            titulo.setLayoutData(GridLayout.createLayoutData(
-                    GridLayout.Alignment.CENTER,
-                    GridLayout.Alignment.CENTER,
-                    true,
-                    false
-            ));
+            titulo.setLayoutData(LinearLayout.createLayoutData(LinearLayout.Alignment.Center));
             mainPanel.addComponent(titulo);
 
+            // instrucciones
             Label instrucciones = new Label("Seleccione una acción y pulse ENTER para crear alerta");
             instrucciones.setForegroundColor(TextColor.ANSI.YELLOW);
-            instrucciones.setLayoutData(GridLayout.createLayoutData(
-                    GridLayout.Alignment.CENTER,
-                    GridLayout.Alignment.CENTER,
-                    true,
-                    false
-            ));
+            instrucciones.setLayoutData(LinearLayout.createLayoutData(LinearLayout.Alignment.Center));
             mainPanel.addComponent(instrucciones);
+
+            // indicador de estado del mercado
+            boolean abierto = BolsaIbex.mercadoAbierto();
+            Label estadoMercado = new Label(abierto ? "[O] Mercado ABIERTO" : "[X] Mercado CERRADO");
+            estadoMercado.setForegroundColor(abierto ? TextColor.ANSI.GREEN : TextColor.ANSI.RED);
+            estadoMercado.setLayoutData(LinearLayout.createLayoutData(LinearLayout.Alignment.Center));
+            mainPanel.addComponent(estadoMercado);
 
             mainPanel.addComponent(new EmptySpace(TerminalSize.ONE));
 
-            // Tabla de acciones
+            // tabla main de acciones
             tabla = new Table<>("Nombre", "Precio Actual", "Variación");
             tabla.setTableCellRenderer(new TableCellRenderer<String>() {
                 @Override
@@ -99,7 +98,7 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
                     }
 
                     TextColor color = TextColor.ANSI.WHITE;
-                    if (col == 2) { // Columna de variación
+                    if (col == 2) { // columna de variación ten texto custom
                         String var = acciones.get(row).getVariacion();
                         if (var.startsWith("+")) {
                             color = TextColor.ANSI.GREEN_BRIGHT;
@@ -119,31 +118,33 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
                 }
             });
 
-            tabla.setSelectAction(() -> {
+            tabla.setSelectAction(() -> { // ao seleccionar una fila permite crear unha alerta
                 int idx = tabla.getSelectedRow();
                 if (idx >= 0 && idx < acciones.size()) {
                     mostrarDialogoAlerta(acciones.get(idx));
                 }
             });
 
-            tabla.setLayoutData(GridLayout.createLayoutData(
-                    GridLayout.Alignment.FILL,
-                    GridLayout.Alignment.FILL,
-                    true,
-                    true
-            ));
+            Panel tablePanel = new Panel(new BorderLayout());
+            tablePanel.addComponent(tabla.withBorder(Borders.singleLine()));
 
-            mainPanel.addComponent(tabla.withBorder(Borders.singleLine()));
+            // ll para que a tabla se poda expandir
+            tablePanel.setLayoutData(LinearLayout.createLayoutData(LinearLayout.Alignment.Fill));
+            mainPanel.addComponent(tablePanel);
 
             mainPanel.addComponent(new EmptySpace(TerminalSize.ONE));
 
-            // Botones
-            mainPanel.addComponent(new Button("Actualizar", () -> actualizarAcciones()));
-            mainPanel.addComponent(new Button("Salir", () -> cerrarAplicacion()));
+            // botones
+            Panel buttonPanel = new Panel(new LinearLayout(Direction.HORIZONTAL));
+            buttonPanel.setLayoutData(LinearLayout.createLayoutData(LinearLayout.Alignment.Center));
+
+            buttonPanel.addComponent(new Button("Actualizar", this::actualizarAcciones));
+            buttonPanel.addComponent(new EmptySpace(new TerminalSize(2, 1))); // spacer
+            buttonPanel.addComponent(new Button("Salir", this::cerrarAplicacion));
+
+            mainPanel.addComponent(buttonPanel);
 
             ventana.setComponent(mainPanel);
-
-            // Cargar datos iniciales
             actualizarAcciones();
 
             gui.addWindowAndWait(ventana);
@@ -153,30 +154,71 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
             e.printStackTrace();
         }
     }
-
     private void actualizarAcciones() {
-        try {
-            acciones = serv.getStocks();
-            tabla.getTableModel().clear();
+        // intenta recibir accions do servidor.
+        // se se intenta recibir xusto no momento mentras o servidor está conectando coa web, devolverá 0,
+        // asi que nese caso hai que volver a intentalo
 
-            for (Accion accion : acciones) {
-                tabla.getTableModel().addRow(
-                        accion.getNombre(),
-                        accion.getUltimoPrecio(),
-                        accion.getVariacion()
-                );
+        // utiliza timer exponencial
+        try {
+            int maxReintentos = 5;
+            int baseDelayMs = 1000; // delay inicial: 1 segundo
+            int intento = 0;
+
+            while (intento < maxReintentos) {
+                acciones = serv.getStocks();
+
+                if (acciones != null && acciones.size() == BolsaIbex.numAcciones) {
+                    tabla.getTableModel().clear();
+
+                    for (Accion accion : acciones) {
+                        tabla.getTableModel().addRow(
+                                accion.getNombre(),
+                                accion.getUltimoPrecio(),
+                                accion.getVariacion()
+                        );
+                    }
+
+                    System.out.println("[CLIENTE] Acciones actualizadas: " + acciones.size());
+                    return;
+                } else {
+                    intento++;
+                    System.out.println("[CLIENTE] No se obtuvieron suficientes datos. Reintentando...");
+
+                    if (intento < maxReintentos) {
+                        // 1, 2, 4, 8...
+                        int delay = baseDelayMs * (int) Math.pow(2, intento - 1);
+                        try {
+                            Thread.sleep(delay);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
             }
 
-            System.out.println("[CLIENTE] Acciones actualizadas: " + acciones.size());
+            // se se agotaron todos os reintentos
+            mensajeError("No se han podido cargar las acciones. Vuelva a intentarlo más tarde.");
+
         } catch (RemoteException e) {
-            MessageDialog.showMessageDialog(gui, "Error",
-                    "Error al obtener acciones: " + e.getMessage(),
-                    MessageDialogButton.OK);
+            mensajeError("No se han podido cargar las acciones. Vuelva a intentarlo más tarde.");
+            System.err.println(e.getMessage());
         }
     }
 
+    private void mensajeError(String mensaje) {
+        // crea unha ventana co mensaje dados
+        tabla.getTableModel().clear();
+
+        MessageDialog.showMessageDialog(gui, "Error",
+                mensaje,
+                MessageDialogButton.OK);
+    }
+
     private void mostrarDialogoAlerta(Accion accion) {
-        BasicWindow dialogoAlerta = new BasicWindow("Crear Alerta");
+        // ventana para crear unha alerta nova
+        BasicWindow dialogoAlerta = new BasicWindow("Definir Alerta");
         dialogoAlerta.setHints(java.util.Set.of(Window.Hint.CENTERED));
 
         Panel mainPanel = new Panel();
@@ -184,7 +226,7 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
 
         double precioActual = Double.parseDouble(accion.getUltimoPrecio().replace(",", "."));
 
-        // Título
+        // titulo
         Label titulo = new Label("Crear Alerta");
         titulo.setForegroundColor(TextColor.ANSI.CYAN_BRIGHT);
         titulo.setLayoutData(GridLayout.createLayoutData(
@@ -197,7 +239,7 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
 
         mainPanel.addComponent(new EmptySpace(TerminalSize.ONE));
 
-        // Información de la acción
+        // info accion + entrada
         Panel panelInfo = new Panel(new GridLayout(2));
 
         panelInfo.addComponent(new Label("Acción:"));
@@ -213,7 +255,6 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
         mainPanel.addComponent(panelInfo);
         mainPanel.addComponent(new EmptySpace(TerminalSize.ONE));
 
-        // Formulario
         Panel panelForm = new Panel(new GridLayout(2));
 
         panelForm.addComponent(new Label("Valor umbral:"));
@@ -228,7 +269,7 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
         mainPanel.addComponent(panelForm);
         mainPanel.addComponent(new EmptySpace(TerminalSize.ONE));
 
-        // Botones
+        // botons
         mainPanel.addComponent(new Button("Crear Alerta", () -> {
             try {
                 double valor = Double.parseDouble(txtValor.getText().replace(",", "."));
@@ -237,12 +278,15 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
                 Alerta alerta = new Alerta(accion.getNombre(), valor, esCompra);
 
                 try {
-                    serv.pedirAlerta(alerta, this);
-                    MessageDialog.showMessageDialog(gui, "Éxito",
+                    // a ventana de info imprimese antes de pedir a alerta para que se a alerta se cumple xa no momento,
+                    // queda mellor que sala primeiro o aviso de "alerta creada" e despois o de "notificacion recibida"
+                    MessageDialog.showMessageDialog(gui, "Info",
                             String.format("Alerta creada:\n%s: %.2f € (%s)",
                                     accion.getNombre(), valor,
                                     esCompra ? "Compra" : "Venta"),
                             MessageDialogButton.OK);
+                    serv.pedirAlerta(alerta, this);
+
                     System.out.println("[CLIENTE] Alerta creada: " + alerta.getNombreStock()
                             + " - " + valor + " € - " + (esCompra ? "Compra" : "Venta"));
                     dialogoAlerta.close();
@@ -264,22 +308,24 @@ public class Cliente extends UnicastRemoteObject implements ICliente {
         gui.addWindow(dialogoAlerta);
     }
 
-    @Override
-    public void notificarAlerta(Alerta alerta) throws RemoteException {
+    @Override //! metodo interfaz
+    public void notificarAlerta(Alerta alerta, String valorActual) throws RemoteException {
         System.out.println("[CLIENTE] ¡ALERTA RECIBIDA! " + alerta.getNombreStock()
                 + " - " + alerta.getValor() + " € - " + (alerta.getEsCompra() ? "Compra" : "Venta"));
 
         if (gui != null) {
             gui.getGUIThread().invokeLater(() -> {
                 try {
-                    MessageDialog.showMessageDialog(gui, "⚠ ALERTA ACTIVADA ⚠",
-                            String.format("Acción: %s\nValor: %.2f €\nTipo: %s\n\n¡El precio ha alcanzado el umbral!",
+                    MessageDialog.showMessageDialog(gui, "ALERTA ACTIVADA",
+                            String.format("Acción: %s\nUmbral de alerta: %.2f €\nTipo: %s\nValor actual: %s\n\n¡El precio ha alcanzado el umbral!",
                                     alerta.getNombreStock(),
                                     alerta.getValor(),
-                                    alerta.getEsCompra() ? "COMPRA (bajó)" : "VENTA (subió)"),
+                                    alerta.getEsCompra() ? "COMPRA (bajó)" : "VENTA (subió)",
+                                    valorActual),
                             MessageDialogButton.OK);
                 } catch (Exception e) {
                     System.err.println("Error mostrando alerta: " + e.getMessage());
+                    mensajeError("Error mostrando alerta: " + e.getMessage());
                 }
             });
         }

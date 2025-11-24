@@ -20,19 +20,9 @@ public class Accion implements Serializable {
     public String getNombre() { return nombre; }
     public String getUltimoPrecio() { return ultimoPrecio.replace(",", "."); }
     public String getVariacion() { return variacion; }
-    public float getUltimoPrecioFloat() { return Float.parseFloat(getUltimoPrecio()); }
+
     @Override
     public String toString() {
         return String.format("%-20s | %-10s | %s", nombre, ultimoPrecio, variacion);
-
     }
-
-    public void setUltimoPrecio(String nuevoPrecioStr) {
-        this.ultimoPrecio = nuevoPrecioStr.replace(",", "."); // por se aca
-    }
-
-    public void setVariacion(String variacion) {
-        this.variacion = variacion.replace(",", ".");
-    }
-
 }

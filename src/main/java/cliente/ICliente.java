@@ -6,6 +6,6 @@ import java.rmi.Remote;
 import java.rmi.RemoteException;
 
 public interface ICliente extends Remote {
-    void notificarAlerta(Alerta alerta, String valorActual) throws RemoteException;
+    void notificarAlerta(Alerta alerta) throws RemoteException;
 
 }

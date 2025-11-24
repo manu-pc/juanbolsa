@@ -1,38 +1,20 @@
 package servidor;
 
-import bolsa.BolsaIbex;
-
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.util.Timer;
 import java.util.TimerTask;
 
-
+//? clase main que crea un servidor e o rexistra
 public class ServidorMain {
-    public static int refreshTime = 60000; // en ms (60000 = 1')
-    static void main(String[] args) {
+    static void main() {
         try {
-
-            if(!BolsaIbex.mercadoAbierto()){
-                System.out.println("[MAIN] Aviso: El mercado está cerrado ahora mismo.");
-            }
-            boolean debug;
-            if (args.length > 0 && args[0].equals("1")) {
-                System.out.println("[MAIN] Aviso: Modo debug activado.");
-                debug = true;
-            } else {
-                debug = false;
-            }
             Servidor serv = new Servidor();
-
             Registry reg = LocateRegistry.createRegistry(1099);
-
-
             reg.rebind("ServidorBolsa", serv);
             System.out.println("[MAIN] Servidor RMI listo y esperando clientes! ");
 
             serv.initServidor();
-            serv.actualizarValoresBolsa(false); // inicializa datos sin variacion
 
             Timer timer = new Timer(true); // daemon=trve
             timer.scheduleAtFixedRate(new TimerTask() {
@@ -44,10 +26,10 @@ public class ServidorMain {
                     System.out.println("ultima actualización - " +
                             java.time.LocalDateTime.now().format(
                                     java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")
-                            ));
-                    serv.actualizarValoresBolsa(debug); // modo debug: inventar variacion aleatoria
+                            )); // imprime hora para debug
+                    serv.actualizarValoresBolsa();
                 }
-            }, refreshTime, refreshTime);
+            }, 0, 60000); // 1 minuto, o primeiro é instantaneo
 
         }
         catch (Exception e) {

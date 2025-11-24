@@ -1,5 +1,6 @@
 package cliente;
 
+//? clase main para iniciar o cliente
 public class ClienteMain {
     static void main() {
         try {
